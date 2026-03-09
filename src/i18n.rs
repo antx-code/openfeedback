@@ -32,31 +32,43 @@ pub struct Messages {
     pub prompt_text: &'static str,
     pub approved_callback: &'static str,
     pub rejected_callback: &'static str,
+    pub reject_feedback_prompt: &'static str,
+    pub reject_feedback_callback: &'static str,
+    pub timeout_notice: &'static str,
 }
 
 impl Locale {
     pub fn messages(self) -> Messages {
         match self {
             Self::En => Messages {
-                approve_button: "\u{2705} Approve",
-                reject_button: "\u{274C} Reject",
+                approve_button: "✅ Approve",
+                reject_button: "❌ Reject",
                 prompt_text: "Please approve or reject this request.",
-                approved_callback: "Approved \u{2714}",
-                rejected_callback: "Rejected \u{2714}",
+                approved_callback: "Approved ✔",
+                rejected_callback: "Rejected ✔",
+                reject_feedback_prompt: "❌ <b>Rejected.</b> Reply to this message within 60 seconds to add a reason (or ignore to skip).",
+                reject_feedback_callback: "Rejected with feedback ✔",
+                timeout_notice: "⏰ Request timed out — no response received.",
             },
             Self::ZhCN => Messages {
-                approve_button: "\u{2705} \u{6279}\u{51C6}",
-                reject_button: "\u{274C} \u{62D2}\u{7EDD}",
-                prompt_text: "\u{8BF7}\u{6279}\u{51C6}\u{6216}\u{62D2}\u{7EDD}\u{6B64}\u{8BF7}\u{6C42}\u{3002}",
-                approved_callback: "\u{5DF2}\u{6279}\u{51C6} \u{2714}",
-                rejected_callback: "\u{5DF2}\u{62D2}\u{7EDD} \u{2714}",
+                approve_button: "✅ 批准",
+                reject_button: "❌ 拒绝",
+                prompt_text: "请批准或拒绝此请求。",
+                approved_callback: "已批准 ✔",
+                rejected_callback: "已拒绝 ✔",
+                reject_feedback_prompt: "❌ <b>已拒绝。</b>请在 60 秒内回复此消息以添加原因（忽略则跳过）。",
+                reject_feedback_callback: "已拒绝并附上原因 ✔",
+                timeout_notice: "⏰ 请求已超时 — 未收到响应。",
             },
             Self::ZhTW => Messages {
-                approve_button: "\u{2705} \u{6279}\u{51C6}",
-                reject_button: "\u{274C} \u{62D2}\u{7D55}",
-                prompt_text: "\u{8ACB}\u{6279}\u{51C6}\u{6216}\u{62D2}\u{7D55}\u{6B64}\u{8ACB}\u{6C42}\u{3002}",
-                approved_callback: "\u{5DF2}\u{6279}\u{51C6} \u{2714}",
-                rejected_callback: "\u{5DF2}\u{62D2}\u{7D55} \u{2714}",
+                approve_button: "✅ 批准",
+                reject_button: "❌ 拒絕",
+                prompt_text: "請批准或拒絕此請求。",
+                approved_callback: "已批准 ✔",
+                rejected_callback: "已拒絕 ✔",
+                reject_feedback_prompt: "❌ <b>已拒絕。</b>請在 60 秒內回覆此訊息以附上原因（忽略則跳過）。",
+                reject_feedback_callback: "已拒絕並附上原因 ✔",
+                timeout_notice: "⏰ 請求已超時 — 未收到回應。",
             },
         }
     }

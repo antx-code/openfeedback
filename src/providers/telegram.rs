@@ -217,6 +217,82 @@ impl TelegramProvider {
         Ok(())
     }
 
+    async fn send_notice(&self, text: &str) -> Result<()> {
+        #[derive(Serialize)]
+        struct Req {
+            chat_id: i64,
+            text: String,
+            parse_mode: String,
+        }
+        self.client
+            .post(format!("{}/sendMessage", self.base_url))
+            .json(&Req {
+                chat_id: self.config.chat_id,
+                text: text.to_string(),
+                parse_mode: "HTML".to_string(),
+            })
+            .send()
+            .await?;
+        Ok(())
+    }
+
+    /// After a Reject button click, wait up to 60 seconds for a text reply
+    /// to the original message. Returns Some(feedback) or None if no reply arrives.
+    async fn wait_for_reject_feedback(
+        &self,
+        sent_message_id: i64,
+        mut offset: Option<i64>,
+    ) -> Result<Option<String>> {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+
+        loop {
+            if tokio::time::Instant::now() >= deadline {
+                return Ok(None);
+            }
+
+            let remaining = deadline - tokio::time::Instant::now();
+            let poll_timeout = remaining.min(Duration::from_secs(10));
+
+            let mut url = format!(
+                "{}/getUpdates?timeout={}&allowed_updates=[\"message\"]",
+                self.base_url,
+                poll_timeout.as_secs()
+            );
+            if let Some(off) = offset {
+                url.push_str(&format!("&offset={off}"));
+            }
+
+            let resp: TelegramResponse<Vec<Update>> =
+                self.client.get(&url).send().await?.json().await?;
+
+            let updates = match resp.result {
+                Some(u) => u,
+                None => continue,
+            };
+
+            for update in updates {
+                offset = Some(update.update_id + 1);
+
+                if let Some(msg) = update.message {
+                    if msg.chat.id != self.config.chat_id {
+                        continue;
+                    }
+                    if let Some(ref reply_to) = msg.reply_to_message {
+                        if reply_to.message_id == sent_message_id {
+                            let user_id = msg.from.as_ref().map_or(0, |u| u.id);
+                            if !self.is_trusted(user_id) {
+                                continue;
+                            }
+                            return Ok(msg.text.clone());
+                        }
+                    }
+                }
+            }
+
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    }
+
     async fn poll_for_response(
         &self,
         sent_message_id: i64,
@@ -229,6 +305,11 @@ impl TelegramProvider {
         loop {
             if tokio::time::Instant::now() >= deadline {
                 info!("Timeout reached, no response received");
+                // Remove buttons and send timeout notice
+                self.edit_message_reply_markup(self.config.chat_id, sent_message_id)
+                    .await
+                    .ok();
+                self.send_notice(self.messages.timeout_notice).await.ok();
                 return Ok(FeedbackResponse::timeout(title));
             }
 
@@ -300,11 +381,31 @@ impl TelegramProvider {
                         "Response received"
                     );
 
+                    // For reject: prompt for optional feedback and wait 60s
+                    let feedback = if decision == Decision::Rejected {
+                        self.send_notice(self.messages.reject_feedback_prompt)
+                            .await
+                            .ok();
+                        let fb = self
+                            .wait_for_reject_feedback(sent_message_id, offset)
+                            .await
+                            .unwrap_or(None);
+                        if fb.is_some() {
+                            info!(feedback = ?fb, "Reject feedback received");
+                            self.send_notice(self.messages.reject_feedback_callback)
+                                .await
+                                .ok();
+                        }
+                        fb
+                    } else {
+                        None
+                    };
+
                     return Ok(FeedbackResponse {
                         decision,
                         user: cb.from.display_name(),
                         user_id: cb.from.id,
-                        feedback: None,
+                        feedback,
                         timestamp: Utc::now(),
                         request_title: title.to_string(),
                     });
