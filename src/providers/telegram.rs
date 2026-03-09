@@ -128,9 +128,9 @@ impl TelegramProvider {
 
     async fn send_message(&self, request: &FeedbackRequest) -> Result<i64> {
         let text = format!(
-            "\u{1F50D} *{}*\n\n{}\n\n_Please approve or reject this request._",
-            escape_markdown(&request.title),
-            escape_markdown(&request.body),
+            "\u{1F50D} <b>{}</b>\n\n{}\n\n<i>Please approve or reject this request.</i>",
+            escape_html(&request.title),
+            escape_html(&request.body),
         );
 
         let keyboard = InlineKeyboardMarkup {
@@ -149,7 +149,7 @@ impl TelegramProvider {
         let body = SendMessageRequest {
             chat_id: self.config.chat_id,
             text,
-            parse_mode: "MarkdownV2".to_string(),
+            parse_mode: "HTML".to_string(),
             reply_markup: Some(keyboard),
         };
 
@@ -367,18 +367,9 @@ impl Provider for TelegramProvider {
     }
 }
 
-/// Escape special characters for Telegram MarkdownV2
-fn escape_markdown(text: &str) -> String {
-    let special = [
-        '_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.',
-        '!',
-    ];
-    let mut result = String::with_capacity(text.len());
-    for ch in text.chars() {
-        if special.contains(&ch) {
-            result.push('\\');
-        }
-        result.push(ch);
-    }
-    result
+/// Escape special characters for Telegram HTML parse mode
+fn escape_html(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
