@@ -1,5 +1,6 @@
 mod audit;
 mod config;
+mod i18n;
 mod providers;
 mod render;
 mod types;
@@ -92,7 +93,7 @@ async fn main() -> Result<()> {
             let provider: Box<dyn Provider> = match config.default_provider.as_str() {
                 "telegram" => {
                     let tg_config = config.telegram.expect("telegram config validated");
-                    Box::new(TelegramProvider::new(tg_config))
+                    Box::new(TelegramProvider::new(tg_config, config.locale))
                 }
                 _ => unreachable!("validated in config"),
             };

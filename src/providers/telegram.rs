@@ -7,6 +7,7 @@ use std::time::Duration;
 use tracing::{info, warn};
 
 use crate::config::TelegramConfig;
+use crate::i18n::{Locale, Messages};
 use crate::types::{Decision, FeedbackRequest, FeedbackResponse};
 
 use super::Provider;
@@ -17,6 +18,7 @@ pub struct TelegramProvider {
     config: TelegramConfig,
     client: Client,
     base_url: String,
+    messages: Messages,
 }
 
 // --- Telegram API types ---
@@ -112,12 +114,13 @@ impl User {
 }
 
 impl TelegramProvider {
-    pub fn new(config: TelegramConfig) -> Self {
+    pub fn new(config: TelegramConfig, locale: Locale) -> Self {
         let base_url = format!("https://api.telegram.org/bot{}", config.bot_token);
         Self {
             config,
             client: Client::new(),
             base_url,
+            messages: locale.messages(),
         }
     }
 
@@ -128,19 +131,20 @@ impl TelegramProvider {
 
     async fn send_message(&self, request: &FeedbackRequest) -> Result<i64> {
         let text = format!(
-            "\u{1F50D} <b>{}</b>\n\n{}\n\n<i>Please approve or reject this request.</i>",
+            "\u{1F50D} <b>{}</b>\n\n{}\n\n<i>{}</i>",
             escape_html(&request.title),
             escape_html(&request.body),
+            self.messages.prompt_text,
         );
 
         let keyboard = InlineKeyboardMarkup {
             inline_keyboard: vec![vec![
                 InlineKeyboardButton {
-                    text: "\u{2705} Approve".to_string(),
+                    text: self.messages.approve_button.to_string(),
                     callback_data: "approve".to_string(),
                 },
                 InlineKeyboardButton {
-                    text: "\u{274C} Reject".to_string(),
+                    text: self.messages.reject_button.to_string(),
                     callback_data: "reject".to_string(),
                 },
             ]],
@@ -278,12 +282,12 @@ impl TelegramProvider {
                         _ => continue,
                     };
 
-                    let label = if decision == Decision::Approved {
-                        "Approved"
+                    let callback_text = if decision == Decision::Approved {
+                        self.messages.approved_callback
                     } else {
-                        "Rejected"
+                        self.messages.rejected_callback
                     };
-                    self.answer_callback(&cb.id, &format!("{label} \u{2714}"))
+                    self.answer_callback(&cb.id, callback_text)
                         .await
                         .ok();
                     self.edit_message_reply_markup(cb_msg.chat.id, cb_msg.message_id)
@@ -291,7 +295,7 @@ impl TelegramProvider {
                         .ok();
 
                     info!(
-                        decision = label,
+                        decision = callback_text,
                         user = cb.from.display_name(),
                         "Response received"
                     );

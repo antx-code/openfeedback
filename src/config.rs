@@ -2,12 +2,16 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+use crate::i18n::Locale;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default = "default_provider")]
     pub default_provider: String,
     #[serde(default = "default_timeout")]
     pub default_timeout: u64,
+    #[serde(default)]
+    pub locale: Locale,
     pub telegram: Option<TelegramConfig>,
     #[serde(default)]
     pub logging: LoggingConfig,
@@ -98,6 +102,8 @@ impl Config {
     pub fn generate_default() -> String {
         r#"default_provider = "telegram"
 default_timeout = 3600
+# locale: "en" (default), "zh-CN", "zh-TW"
+locale = "en"
 
 [telegram]
 bot_token = "YOUR_BOT_TOKEN"
