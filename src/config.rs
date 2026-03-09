@@ -10,6 +10,8 @@ pub struct Config {
     pub default_provider: String,
     #[serde(default = "default_timeout")]
     pub default_timeout: u64,
+    #[serde(default = "default_reject_feedback_timeout")]
+    pub reject_feedback_timeout: u64,
     #[serde(default)]
     pub locale: Locale,
     pub telegram: Option<TelegramConfig>,
@@ -45,6 +47,10 @@ fn default_provider() -> String {
 
 fn default_timeout() -> u64 {
     3600
+}
+
+fn default_reject_feedback_timeout() -> u64 {
+    60
 }
 
 fn default_audit_file() -> String {
@@ -102,6 +108,8 @@ impl Config {
     pub fn generate_default() -> String {
         r#"default_provider = "telegram"
 default_timeout = 3600
+# Seconds to wait for reject feedback (0 = skip)
+reject_feedback_timeout = 60
 # locale: "en" (default), "zh-CN", "zh-TW"
 locale = "en"
 

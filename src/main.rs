@@ -88,6 +88,7 @@ async fn main() -> Result<()> {
                 title: title.clone(),
                 body: body_content,
                 timeout_secs,
+                reject_feedback_timeout_secs: config.reject_feedback_timeout,
             };
 
             let provider: Box<dyn Provider> = match config.default_provider.as_str() {

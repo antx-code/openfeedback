@@ -6,6 +6,7 @@ pub struct FeedbackRequest {
     pub title: String,
     pub body: String,
     pub timeout_secs: u64,
+    pub reject_feedback_timeout_secs: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

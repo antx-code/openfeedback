@@ -217,11 +217,124 @@ impl TelegramProvider {
         Ok(())
     }
 
+    /// Send a message as a reply to another message
+    async fn send_reply(&self, reply_to_message_id: i64, text: &str) -> Result<i64> {
+        #[derive(Serialize)]
+        struct Req {
+            chat_id: i64,
+            text: String,
+            parse_mode: String,
+            reply_to_message_id: i64,
+        }
+        let resp: TelegramResponse<Message> = self
+            .client
+            .post(format!("{}/sendMessage", self.base_url))
+            .json(&Req {
+                chat_id: self.config.chat_id,
+                text: text.to_string(),
+                parse_mode: "HTML".to_string(),
+                reply_to_message_id,
+            })
+            .send()
+            .await?
+            .json()
+            .await?;
+        let msg_id = resp.result.map_or(0, |m| m.message_id);
+        Ok(msg_id)
+    }
+
+    /// Send a standalone notice message
+    async fn send_notice(&self, text: &str) -> Result<()> {
+        #[derive(Serialize)]
+        struct Req {
+            chat_id: i64,
+            text: String,
+            parse_mode: String,
+        }
+        self.client
+            .post(format!("{}/sendMessage", self.base_url))
+            .json(&Req {
+                chat_id: self.config.chat_id,
+                text: text.to_string(),
+                parse_mode: "HTML".to_string(),
+            })
+            .send()
+            .await?;
+        Ok(())
+    }
+
+    /// After reject, send a follow-up reply and wait for feedback text
+    async fn wait_for_reject_feedback(
+        &self,
+        original_message_id: i64,
+        wait_secs: u64,
+        mut offset: Option<i64>,
+    ) -> Result<Option<String>> {
+        if wait_secs == 0 {
+            return Ok(None);
+        }
+
+        // Send follow-up as reply to the original request message
+        // Send follow-up as reply to the original request message
+        self.send_reply(original_message_id, self.messages.reject_feedback_prompt)
+            .await
+            .ok();
+
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(wait_secs);
+
+        loop {
+            if tokio::time::Instant::now() >= deadline {
+                return Ok(None);
+            }
+
+            let remaining = deadline - tokio::time::Instant::now();
+            let poll_timeout = remaining.min(Duration::from_secs(10));
+
+            let mut url = format!(
+                "{}/getUpdates?timeout={}&allowed_updates=[\"message\"]",
+                self.base_url,
+                poll_timeout.as_secs()
+            );
+            if let Some(off) = offset {
+                url.push_str(&format!("&offset={off}"));
+            }
+
+            let resp: TelegramResponse<Vec<Update>> =
+                self.client.get(&url).send().await?.json().await?;
+
+            let updates = match resp.result {
+                Some(u) => u,
+                None => continue,
+            };
+
+            for update in updates {
+                offset = Some(update.update_id + 1);
+
+                if let Some(msg) = update.message {
+                    if msg.chat.id != self.config.chat_id {
+                        continue;
+                    }
+                    let user_id = msg.from.as_ref().map_or(0, |u| u.id);
+                    if !self.is_trusted(user_id) {
+                        continue;
+                    }
+                    // Accept any text message from trusted user in this chat
+                    // (reply to original, reply to follow-up, or direct message)
+                    if msg.text.is_some() {
+                        return Ok(msg.text.clone());
+                    }
+                }
+            }
+
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    }
+
     async fn poll_for_response(
         &self,
         sent_message_id: i64,
         timeout: Duration,
-        title: &str,
+        request: &FeedbackRequest,
     ) -> Result<FeedbackResponse> {
         let deadline = tokio::time::Instant::now() + timeout;
         let mut offset: Option<i64> = None;
@@ -229,7 +342,11 @@ impl TelegramProvider {
         loop {
             if tokio::time::Instant::now() >= deadline {
                 info!("Timeout reached, no response received");
-                return Ok(FeedbackResponse::timeout(title));
+                self.edit_message_reply_markup(self.config.chat_id, sent_message_id)
+                    .await
+                    .ok();
+                self.send_notice(self.messages.timeout_notice).await.ok();
+                return Ok(FeedbackResponse::timeout(&request.title));
             }
 
             let remaining = deadline - tokio::time::Instant::now();
@@ -300,13 +417,31 @@ impl TelegramProvider {
                         "Response received"
                     );
 
+                    // For reject: prompt for optional feedback
+                    let feedback = if decision == Decision::Rejected {
+                        let fb = self
+                            .wait_for_reject_feedback(
+                                sent_message_id,
+                                request.reject_feedback_timeout_secs,
+                                offset,
+                            )
+                            .await
+                            .unwrap_or(None);
+                        if fb.is_some() {
+                            info!(feedback = ?fb, "Reject feedback received");
+                        }
+                        fb
+                    } else {
+                        None
+                    };
+
                     return Ok(FeedbackResponse {
                         decision,
                         user: cb.from.display_name(),
                         user_id: cb.from.id,
-                        feedback: None,
+                        feedback,
                         timestamp: Utc::now(),
-                        request_title: title.to_string(),
+                        request_title: request.title.clone(),
                     });
                 }
 
@@ -350,7 +485,7 @@ impl TelegramProvider {
                                 user_id,
                                 feedback: feedback_text,
                                 timestamp: Utc::now(),
-                                request_title: title.to_string(),
+                                request_title: request.title.clone(),
                             });
                         }
                     }
@@ -367,7 +502,7 @@ impl Provider for TelegramProvider {
     async fn send_and_wait(&self, request: &FeedbackRequest) -> Result<FeedbackResponse> {
         let msg_id = self.send_message(request).await?;
         let timeout = Duration::from_secs(request.timeout_secs);
-        self.poll_for_response(msg_id, timeout, &request.title).await
+        self.poll_for_response(msg_id, timeout, request).await
     }
 }
 
