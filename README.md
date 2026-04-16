@@ -2,10 +2,12 @@
 
 Human-in-the-loop decision gate CLI for AI agents.
 
-When an AI agent (Claude Code, Kiro, or any automation script) reaches a decision point that requires human approval, `openfeedback` sends a rich message to your IM (Telegram) with **Approve / Reject** buttons and waits for a response.
+When an AI agent (Claude Code, Kiro, or any automation script) reaches a decision point that requires human approval, `openfeedback` sends a rich message to your IM (**Telegram** or **Discord**) with **Approve / Reject** buttons and waits for a response.
+
+It also supports **failover**: if the primary channel doesn't answer within a configurable window, the pending request is cleaned up (buttons removed + "escalated" notice posted) and the request is re-sent on a secondary channel — so a silent primary never blocks your agent.
 
 ```
-Agent → openfeedback send → Telegram → Human clicks Approve/Reject
+Agent → openfeedback send → Telegram / Discord → Human clicks Approve/Reject
                           ← exit code + JSON ←
 ```
 
@@ -63,7 +65,8 @@ JSON to stdout for agent consumption:
   "user_id": 123456789,
   "feedback": "Not ready, need more tests",
   "timestamp": "2026-03-09T13:48:29Z",
-  "request_title": "Deploy hotfix to staging?"
+  "request_title": "Deploy hotfix to staging?",
+  "provider": "telegram"
 }
 ```
 
@@ -71,17 +74,34 @@ The `feedback` field is populated when:
 - User replies with text after clicking **Reject** (within the feedback window)
 - User replies to the original request message (treated as approval with feedback)
 
+The `provider` field identifies which channel produced the decision. If a failover occurred, an `escalated_from` field is also present:
+
+```json
+{
+  "decision": "approved",
+  "provider": "discord",
+  "escalated_from": "telegram",
+  "...": "..."
+}
+```
+
 ## Configuration
 
 `~/.config/openfeedback/config.toml`:
 
 ```toml
-default_provider = "telegram"
+default_provider = "telegram"    # "telegram" or "discord"
 default_timeout = 3600
 # Seconds to wait for reject feedback (0 = skip)
 reject_feedback_timeout = 60
 # locale: "en" (default), "zh-CN", "zh-TW"
 locale = "en"
+
+# --- Optional failover ---
+# If set, when the primary times out the CLI cleans up (removes buttons + posts an
+# "escalated" notice) and re-sends on this secondary provider.
+# failover_provider = "discord"
+# escalate_after_secs = 1800     # default: half of default_timeout
 
 [telegram]
 bot_token = "YOUR_BOT_TOKEN"
@@ -89,16 +109,25 @@ chat_id = 0
 # Only these user IDs can approve/reject. Empty = allow all.
 trusted_user_ids = []
 
+# [discord]
+# bot_token = "YOUR_BOT_TOKEN"
+# application_id = "YOUR_APPLICATION_ID"
+# channel_id = "YOUR_CHANNEL_ID"
+# trusted_user_ids = []            # Discord snowflakes as strings
+
 [logging]
 # audit_file = "~/.local/share/openfeedback/audit.jsonl"
 ```
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `default_timeout` | 3600 | Seconds to wait for approve/reject before timing out |
+| `default_provider` | `"telegram"` | Which provider receives requests: `"telegram"` or `"discord"` |
+| `default_timeout` | 3600 | Total seconds to wait for approve/reject before timing out |
 | `reject_feedback_timeout` | 60 | Seconds to wait for rejection reason (0 = skip) |
 | `locale` | `"en"` | UI language: `"en"`, `"zh-CN"`, `"zh-TW"` |
-| `trusted_user_ids` | `[]` | Telegram user IDs allowed to respond (empty = all) |
+| `failover_provider` | *(none)* | Optional secondary provider, activated when primary doesn't answer in time |
+| `escalate_after_secs` | `default_timeout / 2` | How long to wait on the primary before escalating |
+| `trusted_user_ids` | `[]` | Per-provider whitelist (empty = allow all) |
 
 ### Telegram Setup
 
@@ -110,16 +139,63 @@ trusted_user_ids = []
    ```
 4. Add `bot_token`, `chat_id`, and your user ID to `trusted_user_ids`
 
+### Discord Setup
+
+1. Create an application at <https://discord.com/developers/applications>
+2. Under **Bot**, reset/copy the **Bot Token** → `discord.bot_token`
+3. Copy the **Application ID** from *General Information* → `discord.application_id`
+4. Under **Bot → Privileged Gateway Intents**, enable **MESSAGE CONTENT INTENT**
+   (needed so the bot can read reply-text feedback)
+5. Under **OAuth2 → URL Generator**, pick scopes `bot` + permissions
+   `Send Messages`, `Read Message History` (and `Use Slash Commands` if you want),
+   then invite the bot to your server
+6. Right-click the target channel → **Copy Channel ID** → `discord.channel_id`
+   (turn on Developer Mode in Discord settings first)
+7. Optionally add your own Discord user ID(s) to `discord.trusted_user_ids`
+
+### Failover (Telegram + Discord)
+
+Configure both providers, then:
+
+```toml
+default_provider = "telegram"
+failover_provider = "discord"
+escalate_after_secs = 1800       # try Telegram for 30 min, then Discord
+default_timeout = 3600           # total budget (Telegram + Discord)
+```
+
+Behavior:
+
+- **Approve / Reject on Telegram** — returns immediately, Discord is never touched.
+- **No response within 30 min on Telegram** — Telegram buttons are removed, an "escalated" notice is posted in Telegram, and a fresh request with buttons is posted to Discord (remaining 30 min budget).
+- **No response on Discord either** — Discord buttons are removed, timeout notice posted, CLI exits `2`.
+
+At any moment only **one** channel has live buttons, so rejection reasons are never split between channels.
+
+### CLI flags
+
+```bash
+# Default: follow config (with failover if configured)
+openfeedback send --title "..." --body "..."
+
+# Override to a single provider, disable failover entirely
+openfeedback send --provider discord --title "..." --body "..."
+
+# Override total timeout
+openfeedback send --title "..." --body "..." --timeout 600
+```
+
 ## Features
 
 - **Single binary** — no runtime dependencies, no server needed
-- **Blocking CLI** — sends message, polls for response, exits with result
+- **Blocking CLI** — sends message, waits for response, exits with result
+- **Telegram + Discord** — native buttons on both (Telegram long-polling, Discord Gateway)
+- **Failover** — automatic cleanup + handoff to a secondary provider on primary timeout
 - **Reject feedback** — after rejection, prompts for a reason (configurable timeout)
 - **Timeout cleanup** — removes stale buttons and sends a notice on timeout
-- **Trusted users** — whitelist who can approve/reject
-- **Audit log** — every decision recorded to JSONL
+- **Trusted users** — per-provider whitelist of who can approve/reject
+- **Audit log** — every decision recorded to JSONL with `provider` + `escalated_from`
 - **i18n** — English, Simplified Chinese, Traditional Chinese
-- **Provider trait** — extensible for Slack, Discord, etc.
 
 ## Use with AI Agents
 

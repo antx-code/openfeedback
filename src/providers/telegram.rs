@@ -8,7 +8,7 @@ use tracing::{info, warn};
 
 use crate::config::TelegramConfig;
 use crate::i18n::{Locale, Messages};
-use crate::types::{Decision, FeedbackRequest, FeedbackResponse};
+use crate::types::{Decision, FeedbackRequest, FeedbackResponse, TimeoutKind};
 
 use super::Provider;
 
@@ -345,8 +345,14 @@ impl TelegramProvider {
                 self.edit_message_reply_markup(self.config.chat_id, sent_message_id)
                     .await
                     .ok();
-                self.send_notice(self.messages.timeout_notice).await.ok();
-                return Ok(FeedbackResponse::timeout(&request.title));
+                let notice = match request.timeout_kind {
+                    TimeoutKind::Final => self.messages.timeout_notice,
+                    TimeoutKind::Escalated => self.messages.escalated_notice,
+                };
+                self.send_notice(notice).await.ok();
+                let mut resp = FeedbackResponse::timeout(&request.title);
+                resp.provider = Some("telegram".to_string());
+                return Ok(resp);
             }
 
             let remaining = deadline - tokio::time::Instant::now();
@@ -442,6 +448,8 @@ impl TelegramProvider {
                         feedback,
                         timestamp: Utc::now(),
                         request_title: request.title.clone(),
+                        provider: Some("telegram".to_string()),
+                        escalated_from: None,
                     });
                 }
 
@@ -486,6 +494,8 @@ impl TelegramProvider {
                                 feedback: feedback_text,
                                 timestamp: Utc::now(),
                                 request_title: request.title.clone(),
+                                provider: Some("telegram".to_string()),
+                                escalated_from: None,
                             });
                         }
                     }

@@ -11,9 +11,7 @@ use std::process;
 use tracing_subscriber::EnvFilter;
 
 use config::Config;
-use providers::telegram::TelegramProvider;
-use providers::Provider;
-use types::FeedbackRequest;
+use types::{FeedbackRequest, TimeoutKind};
 
 #[derive(Parser)]
 #[command(name = "openfeedback")]
@@ -43,6 +41,11 @@ enum Commands {
         /// Timeout in seconds (default: from config)
         #[arg(long)]
         timeout: Option<u64>,
+
+        /// Override which provider to use (disables failover).
+        /// E.g. `--provider discord` or `--provider telegram`.
+        #[arg(long)]
+        provider: Option<String>,
     },
 
     /// Initialize config file with defaults
@@ -51,6 +54,10 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // rustls 0.23 requires an explicit CryptoProvider. Install ring globally
+    // so tokio-tungstenite can negotiate TLS without extra plumbing.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .with_target(false)
@@ -70,7 +77,7 @@ async fn main() -> Result<()> {
             }
             std::fs::write(&path, Config::generate_default())?;
             eprintln!("Config created at {}", path.display());
-            eprintln!("Edit it with your Telegram bot token and chat ID.");
+            eprintln!("Edit it with your provider credentials.");
         }
 
         Commands::Send {
@@ -78,10 +85,10 @@ async fn main() -> Result<()> {
             body_file,
             body,
             timeout,
+            provider,
         } => {
             let config = Config::load()?;
-            let body_content =
-                render::load_body(body_file.as_deref(), body.as_deref())?;
+            let body_content = render::load_body(body_file.as_deref(), body.as_deref())?;
             let timeout_secs = timeout.unwrap_or(config.default_timeout);
 
             let request = FeedbackRequest {
@@ -89,17 +96,12 @@ async fn main() -> Result<()> {
                 body: body_content,
                 timeout_secs,
                 reject_feedback_timeout_secs: config.reject_feedback_timeout,
+                timeout_kind: TimeoutKind::Final,
             };
 
-            let provider: Box<dyn Provider> = match config.default_provider.as_str() {
-                "telegram" => {
-                    let tg_config = config.telegram.expect("telegram config validated");
-                    Box::new(TelegramProvider::new(tg_config, config.locale))
-                }
-                _ => unreachable!("validated in config"),
-            };
-
-            let response = provider.send_and_wait(&request).await?;
+            let plan = providers::orchestrator::plan(&config, provider.as_deref())?;
+            let response =
+                providers::orchestrator::run(plan, timeout_secs, request).await?;
 
             // Write audit log
             audit::log_response(&config.logging.audit_file, &response)?;

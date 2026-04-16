@@ -14,7 +14,18 @@ pub struct Config {
     pub reject_feedback_timeout: u64,
     #[serde(default)]
     pub locale: Locale,
+
+    /// Optional secondary provider. When set, the primary provider's
+    /// timeout becomes a soft failover handoff.
+    #[serde(default)]
+    pub failover_provider: Option<String>,
+    /// How long to wait on the primary before escalating.
+    /// If unset, defaults to half of `default_timeout`.
+    #[serde(default)]
+    pub escalate_after_secs: Option<u64>,
+
     pub telegram: Option<TelegramConfig>,
+    pub discord: Option<DiscordConfig>,
     #[serde(default)]
     pub logging: LoggingConfig,
 }
@@ -25,6 +36,17 @@ pub struct TelegramConfig {
     pub chat_id: i64,
     #[serde(default)]
     pub trusted_user_ids: Vec<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiscordConfig {
+    pub bot_token: String,
+    /// Discord snowflakes are 64-bit unsigned; store as string to avoid JSON precision issues.
+    pub channel_id: String,
+    /// Required when using a bot token — your Discord application ID.
+    pub application_id: String,
+    #[serde(default)]
+    pub trusted_user_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -86,8 +108,8 @@ impl Config {
         Ok(config)
     }
 
-    fn validate(&self) -> Result<()> {
-        match self.default_provider.as_str() {
+    pub fn validate_provider(&self, provider: &str) -> Result<()> {
+        match provider {
             "telegram" => {
                 let tg = self
                     .telegram
@@ -100,7 +122,35 @@ impl Config {
                     anyhow::bail!("telegram.chat_id cannot be 0");
                 }
             }
+            "discord" => {
+                let dc = self
+                    .discord
+                    .as_ref()
+                    .context("discord provider selected but [discord] section missing")?;
+                if dc.bot_token.is_empty() {
+                    anyhow::bail!("discord.bot_token cannot be empty");
+                }
+                if dc.channel_id.is_empty() || dc.channel_id == "0" {
+                    anyhow::bail!("discord.channel_id cannot be empty");
+                }
+                if dc.application_id.is_empty() {
+                    anyhow::bail!("discord.application_id cannot be empty");
+                }
+            }
             other => anyhow::bail!("Unknown provider: {other}"),
+        }
+        Ok(())
+    }
+
+    fn validate(&self) -> Result<()> {
+        self.validate_provider(&self.default_provider)?;
+        if let Some(ref fp) = self.failover_provider {
+            if fp == &self.default_provider {
+                anyhow::bail!(
+                    "failover_provider must differ from default_provider (both are {fp})"
+                );
+            }
+            self.validate_provider(fp)?;
         }
         Ok(())
     }
@@ -113,10 +163,23 @@ reject_feedback_timeout = 60
 # locale: "en" (default), "zh-CN", "zh-TW"
 locale = "en"
 
+# --- Optional failover ---
+# If set, when the primary provider times out without a decision,
+# openfeedback cleans up (removes buttons + sends an "escalated" notice)
+# and hands off to this secondary provider.
+# failover_provider = "discord"
+# escalate_after_secs = 1800   # default: half of default_timeout
+
 [telegram]
 bot_token = "YOUR_BOT_TOKEN"
 chat_id = 0
 trusted_user_ids = []
+
+# [discord]
+# bot_token = "YOUR_BOT_TOKEN"
+# application_id = "YOUR_APPLICATION_ID"
+# channel_id = "YOUR_CHANNEL_ID"
+# trusted_user_ids = []
 
 [logging]
 # audit_file = "~/.local/share/openfeedback/audit.jsonl"
