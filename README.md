@@ -331,16 +331,13 @@ New CLI flag:
 - `--provider <telegram|discord>` — force a single provider for one call,
   bypassing `default_provider` and any configured failover.
 
+Config validation (new in v0.3.0): when `failover_provider` is set,
+`escalate_after_secs` must be strictly less than `default_timeout`, otherwise
+config load fails with a clear error. This prevents the silent failure mode
+where the secondary would be invoked with a 0-second budget.
+
 Breaking changes: **none**. v0.2.x integrations (parsing `decision`, `user`,
 `feedback`, exit codes) continue to work unchanged.
-
-### From v0.3.0 → v0.3.1
-
-- Config validation now **rejects** `escalate_after_secs >= default_timeout`
-  when `failover_provider` is set (previously silently gave the secondary a
-  0-second budget). If your existing config hits this, either lower
-  `escalate_after_secs` or raise `default_timeout`.
-- No output, exit code, or CLI changes.
 
 ## Features
 
