@@ -151,6 +151,18 @@ impl Config {
                 );
             }
             self.validate_provider(fp)?;
+            // If escalate_after_secs is explicitly set, it must leave room for
+            // the secondary to actually do something. Otherwise the secondary
+            // would be invoked with a 0-second budget and time out instantly.
+            if let Some(after) = self.escalate_after_secs
+                && after >= self.default_timeout
+            {
+                anyhow::bail!(
+                    "escalate_after_secs ({after}) must be less than default_timeout ({}) \
+                     so the failover provider has a non-zero budget",
+                    self.default_timeout
+                );
+            }
         }
         Ok(())
     }

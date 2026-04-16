@@ -1,19 +1,14 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum Locale {
+    #[default]
     #[serde(rename = "en")]
     En,
     #[serde(rename = "zh-CN")]
     ZhCN,
     #[serde(rename = "zh-TW")]
     ZhTW,
-}
-
-impl Default for Locale {
-    fn default() -> Self {
-        Self::En
-    }
 }
 
 impl std::fmt::Display for Locale {

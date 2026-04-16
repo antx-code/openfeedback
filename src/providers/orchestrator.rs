@@ -60,10 +60,18 @@ pub async fn run(plan: Plan, total_timeout: u64, request: FeedbackRequest) -> Re
     let Plan {
         primary,
         primary_name,
-        secondary,
-        secondary_name,
+        mut secondary,
+        mut secondary_name,
         escalate_after_secs,
     } = plan;
+
+    // Guard: if escalate_after_secs would leave the secondary with a non-positive
+    // budget, silently drop the secondary. Config validation usually catches this
+    // up front, but we defer defensively here too (e.g. CLI --timeout override).
+    if secondary.is_some() && escalate_after_secs >= total_timeout {
+        secondary = None;
+        secondary_name = None;
+    }
 
     // No secondary → primary owns the full budget and any timeout is final.
     let primary_budget = if secondary.is_some() {

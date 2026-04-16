@@ -275,7 +275,6 @@ impl TelegramProvider {
         }
 
         // Send follow-up as reply to the original request message
-        // Send follow-up as reply to the original request message
         self.send_reply(original_message_id, self.messages.reject_feedback_prompt)
             .await
             .ok();
@@ -458,46 +457,46 @@ impl TelegramProvider {
                     if msg.chat.id != self.config.chat_id {
                         continue;
                     }
-                    if let Some(ref reply_to) = msg.reply_to_message {
-                        if reply_to.message_id == sent_message_id {
-                            let user = msg.from.as_ref();
-                            let user_id = user.map_or(0, |u| u.id);
+                    if let Some(ref reply_to) = msg.reply_to_message
+                        && reply_to.message_id == sent_message_id
+                    {
+                        let user = msg.from.as_ref();
+                        let user_id = user.map_or(0, |u| u.id);
 
-                            if !self.is_trusted(user_id) {
-                                warn!(user_id, "Untrusted user replied");
-                                continue;
-                            }
-
-                            let feedback_text = msg.text.clone();
-                            let user_name = user
-                                .map(|u| u.display_name())
-                                .unwrap_or_else(|| "unknown".to_string());
-
-                            info!(
-                                user = %user_name,
-                                feedback = ?feedback_text,
-                                "Text feedback received (treating as approval with feedback)"
-                            );
-
-                            // Text reply = approved with feedback
-                            self.edit_message_reply_markup(
-                                self.config.chat_id,
-                                sent_message_id,
-                            )
-                            .await
-                            .ok();
-
-                            return Ok(FeedbackResponse {
-                                decision: Decision::Approved,
-                                user: user_name,
-                                user_id,
-                                feedback: feedback_text,
-                                timestamp: Utc::now(),
-                                request_title: request.title.clone(),
-                                provider: Some("telegram".to_string()),
-                                escalated_from: None,
-                            });
+                        if !self.is_trusted(user_id) {
+                            warn!(user_id, "Untrusted user replied");
+                            continue;
                         }
+
+                        let feedback_text = msg.text.clone();
+                        let user_name = user
+                            .map(|u| u.display_name())
+                            .unwrap_or_else(|| "unknown".to_string());
+
+                        info!(
+                            user = %user_name,
+                            feedback = ?feedback_text,
+                            "Text feedback received (treating as approval with feedback)"
+                        );
+
+                        // Text reply = approved with feedback
+                        self.edit_message_reply_markup(
+                            self.config.chat_id,
+                            sent_message_id,
+                        )
+                        .await
+                        .ok();
+
+                        return Ok(FeedbackResponse {
+                            decision: Decision::Approved,
+                            user: user_name,
+                            user_id,
+                            feedback: feedback_text,
+                            timestamp: Utc::now(),
+                            request_title: request.title.clone(),
+                            provider: Some("telegram".to_string()),
+                            escalated_from: None,
+                        });
                     }
                 }
             }

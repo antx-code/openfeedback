@@ -414,8 +414,11 @@ impl DiscordProvider {
         if !self.is_trusted(&user_id_str) {
             warn!(user_id = %user_id_str, "Untrusted Discord user attempted action");
             // Silently respond (DEFERRED_UPDATE) to avoid "didn't respond" error.
+            // Interaction callbacks do not require bot auth — the token in the
+            // URL is the per-interaction credential.
             let body = json!({ "type": 6 });
-            let _ = reqwest::Client::new()
+            let _ = self
+                .client
                 .post(format!(
                     "{API_BASE}/interactions/{interaction_id}/{token}/callback"
                 ))
